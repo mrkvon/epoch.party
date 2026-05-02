@@ -1,8 +1,115 @@
-import { LitElement, css, html } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { LitElement, css, html, type PropertyValueMap } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
+import "./countdown-timestamp.js";
+import "./epoch-party-time.js";
 
-@customElement('countdown-timer')
+/**
+ * Party happens PARTY_LENGTH seconds after the timestamp.
+ * After that, next party is advertised.
+ *
+ */
+
+const PARTY_LENGTH = 3600;
+const WAIT_FOR_NEXT_ANNOUNCEMENT = 600;
+
+@customElement("countdown-timer")
 export class CountdownTimer extends LitElement {
+  @property({ type: Array }) timestamps = [];
+  private intervalId: number | null = null;
+
+  @state() private current = Date.now();
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.startTimer();
+  }
+
+  protected willUpdate(
+    _changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>,
+  ): void {
+    this.setMetaDescription();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this.intervalId) clearInterval(this.intervalId);
+  }
+
+  startTimer() {
+    this.updateCurrent();
+    this.intervalId = window.setInterval(() => {
+      this.updateCurrent();
+    }, 50);
+  }
+
+  updateCurrent() {
+    this.current = Math.floor(Date.now() / 1000);
+  }
+
+  private setMetaDescription(): void {
+    const [previous, next] = findBounds(this.timestamps, this.current);
+
+    const isParty = previous && this.current - previous <= PARTY_LENGTH;
+
+    const timestamp = isParty ? previous : next;
+    if (!timestamp) return;
+    const content = `Celebrate UNIX timestamp ${timestamp}! 🎉`;
+
+    let meta = document.querySelector(
+      'meta[name="description"]',
+    ) as HTMLMetaElement | null;
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta["name"] = "description";
+      document.head.appendChild(meta);
+    }
+    meta["content"] = content;
+  }
+
+  render() {
+    const [previous, next] = findBounds(this.timestamps, this.current);
+
+    const isParty = previous && this.current - previous <= PARTY_LENGTH;
+
+    let countdown = html``;
+    if (isParty) {
+      const announceNext =
+        next && this.current - previous > WAIT_FOR_NEXT_ANNOUNCEMENT;
+      countdown = html`<epoch-party-time></epoch-party-time>
+        ${next && announceNext
+          ? html`<div class="next">
+              Next party<br />
+              ${next}
+              <br />
+              ${new Date(next * 1000).toLocaleString()}
+            </div>`
+          : null} `;
+    } else if (!next) {
+      return html`<div>No more parties. 😭</div>`;
+    } else {
+      const remaining = next - this.current;
+      const days = Math.floor(remaining / (3600 * 24));
+      const hours = Math.floor((remaining % (3600 * 24)) / 3600);
+      const minutes = Math.floor((remaining % 3600) / 60);
+      const seconds = Math.floor(remaining % 60);
+
+      countdown = html`
+        <div>in</div>
+        <div title=${new Date(next * 1000).toLocaleString()} class="highlight">
+          ${days}d ${hours}h ${minutes}m ${seconds}s
+        </div>
+      `;
+    }
+
+    return html`
+      <countdown-timestamp
+        .current=${this.current}
+        target=${isParty ? previous : next}
+      ></countdown-timestamp>
+      ${countdown}
+    `;
+  }
+
   static styles = css`
     :host {
       display: flex;
@@ -13,73 +120,53 @@ export class CountdownTimer extends LitElement {
     }
 
     .highlight {
-      color: #ff0055;
+      color: var(--highlight-color);
+    }
+
+    .next {
+      margin-top: 2rem;
+      font-size: 1rem;
+      text-align: center;
+      opacity: 0.5;
     }
   `;
+}
 
-  @property({ type: Number }) timestamp = 0;
+export function randomInRange(min: number, max: number): number {
+  return Math.random() * (max - min) + min;
+}
 
-  @state() private remaining = 0;
-  private intervalId: number | null = null;
-
-  @state() private current = Date.now();
-
-  connectedCallback() {
-    super.connectedCallback();
-    this.startTimer();
+// by LUMO.proton.me
+function findBounds(
+  numbers: number[],
+  target: number,
+): [number | null, number | null] {
+  /**
+   * Given an array of numbers and a target value, returns:
+   * - The nearest number <= target (floor)
+   * - The nearest number >= target (ceiling)
+   *
+   * Returns [null, null] if no such numbers exist.
+   */
+  if (!numbers || numbers.length === 0) {
+    return [null, null];
   }
 
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    if (this.intervalId) clearInterval(this.intervalId);
-  }
+  let floorVal: number | null = null;
+  let ceilVal: number | null = null;
 
-  startTimer() {
-    this.updateRemaining();
-    this.updateCurrent();
-    this.intervalId = window.setInterval(() => {
-      this.updateRemaining();
-      this.updateCurrent();
-    }, 50);
-  }
-
-  updateRemaining() {
-    const now = Math.floor(Date.now() / 1000);
-    this.remaining = Math.max(0, this.timestamp - now);
-
-    if (this.remaining === 0 && this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+  for (const num of numbers) {
+    if (num <= target) {
+      if (floorVal === null || num > floorVal) {
+        floorVal = num;
+      }
+    }
+    if (num > target) {
+      if (ceilVal === null || num < ceilVal) {
+        ceilVal = num;
+      }
     }
   }
 
-  updateCurrent() {
-    this.current = Math.floor(Date.now() / 1000);
-  }
-
-  render() {
-    let countdown = html``;
-    if (this.remaining === 0) {
-      countdown = html`<div>🎉 PARTY TIME! 🎉</div>`;
-    } else {
-      const days = Math.floor(this.remaining / (3600 * 24));
-      const hours = Math.floor((this.remaining % (3600 * 24)) / 3600);
-      const minutes = Math.floor((this.remaining % 3600) / 60);
-      const seconds = Math.floor(this.remaining % 60);
-
-      countdown = html`
-        <div>in</div>
-        <div class="highlight">${days}d ${hours}h ${minutes}m ${seconds}s</div>
-      `;
-    }
-
-    return html`
-      <div class="highlight">${this.timestamp}</div>
-      ${countdown}
-      <!-- <div class="highlight">
-        ${new Date(this.timestamp * 1000).toLocaleString()}
-      </div>
-      <div class="highlight">${this.current}</div> -->
-    `;
-  }
+  return [floorVal, ceilVal];
 }
